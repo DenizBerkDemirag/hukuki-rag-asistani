@@ -1,93 +1,17 @@
-# =========================================
 # Python
-# =========================================
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+*.pyc
 
-# =========================================
-# Sanal Ortamlar (Virtual Environments)
-# =========================================
+# Sanal ortam
 venv/
-env/
-ENV/
 .venv/
-env.bak/
-venv.bak/
 
-# =========================================
-# Vektör Veritabanı ve Yerel Veriler (RAG & ChromaDB)
-# =========================================
+# Vektör veritabanı
 chroma_db/
-*.sqlite3
-*.db
 
-# Yüklenen veya işlenen ham belgeler (data klasörünü koruyup içeriğini yok saymak için)
+# Belgeler
 data/*
 !data/.gitkeep
 
-# =========================================
-# Çevre Değişkenleri ve Gizli Anahtarlar
-# =========================================
+# Ortam değişkenleri
 .env
-.env.local
-.env.*.local
-!.env.example
-
-# =========================================
-# Streamlit
-# =========================================
-.streamlit/secrets.toml
-
-# =========================================
-# Hugging Face / Model Önbellekleri
-# =========================================
-.cache/
-hf_cache/
-
-# =========================================
-# IDE & Editör Dosyaları
-# =========================================
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-*.swp
-*.swo
-
-# =========================================
-# İşletim Sistemi Dosyaları
-# =========================================
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
-desktop.ini
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# =========================================
-# Loglar ve Test Çıktıları
-# =========================================
-*.log
-.pytest_cache/
-.coverage
-htmlcov/
