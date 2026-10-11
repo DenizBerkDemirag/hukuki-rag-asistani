@@ -1,4 +1,5 @@
 import os
+import uuid
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,11 +13,14 @@ from graph_agent import legal_agent_app
 st.set_page_config(page_title="Hukuki RAG Asistanı", page_icon="⚖️", layout="wide")
 
 st.title("⚖️ Hukuki Metin Soru-Cevap ve Araştırma Asistanı")
-st.caption("LangGraph Destekli Kendi Kendini Denetleyen Hukuk Ajanı")
+st.caption("LangGraph Destekli Kendi Kendini Denetleyen Hukuk Ajanı (Corrective RAG)")
 
 # Oturum durumlarını (Session State) başlatma
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
 
 # --- YAN PANEL: PDF YÜKLEME VE İNDEKSLER ---
 with st.sidebar:
@@ -24,26 +28,26 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Bir Hukuki PDF Yükleyin", type=["pdf"])
 
     if uploaded_file is not None:
-        if st.button("Belgeyi İndeksle"):
+        if st.button("Belgeyi İndeksle", use_container_width=True):
             with st.spinner("PDF işleniyor ve vektör veritabanına kaydediliyor..."):
                 os.makedirs("data", exist_ok=True)
                 file_path = os.path.join("data", uploaded_file.name)
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-                # PDF Yükleme ve Parçalama
+                # PDF Yükleme ve Parçalama (Hukuki madde bütünlüğünü koruyan ayarlar)
                 loader = PyPDFLoader(file_path)
                 docs = loader.load()
 
                 text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=400,
-                    chunk_overlap=50,
-                    separators=["\n\n", "\n", " ", ""]
+                    chunk_size=1000,
+                    chunk_overlap=150,
+                    separators=["\nMadde ", "\n\n", "\n", " ", ""]
                 )
                 chunks = text_splitter.split_documents(docs)
 
-                # ChromaDB'ye ekleme
-                embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                # ChromaDB'ye ekleme (Çok dilli model)
+                embeddings = HuggingFaceEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
                 Chroma.from_documents(
                     documents=chunks,
                     embedding=embeddings,
@@ -51,8 +55,9 @@ with st.sidebar:
                 )
                 st.success(f"Başarılı! {len(chunks)} parça ChromaDB'ye eklendi.")
 
-    if st.button("Sohbet Geçmişini Temizle"):
+    if st.button("Sohbet Geçmişini Temizle", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
 
 # --- ANA EKRAN: SOHBET GEÇMİŞİ ---
@@ -60,7 +65,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- KULLANICI GİRDİSİ (HİÇBİR BLOK İÇİNDE OLMAMALIDIR) ---
+# --- KULLANICI GİRDİSİ ---
 user_question = st.chat_input("Hukuki metinle ilgili bir soru sorun...")
 
 if user_question:
@@ -86,8 +91,8 @@ if user_question:
             "chat_history": history_messages
         }
 
-        # LangGraph Memory için tekil thread ID
-        config = {"configurable": {"thread_id": "session_single_user"}}
+        # LangGraph Memory için oturuma özel thread ID
+        config = {"configurable": {"thread_id": st.session_state.thread_id}}
         final_answer = ""
 
         try:
