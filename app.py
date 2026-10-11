@@ -7,120 +7,75 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage, AIMessage
 
-# LangGraph ajanını içe aktarma
 from graph_agent import legal_agent_app
 
-st.set_page_config(page_title="Hukuki RAG Asistanı", page_icon="⚖️", layout="wide")
+# Sayfa Ayarı
+st.set_page_config(page_title="Hukuki Asistan", page_icon="⚖️", layout="centered")
 
-st.title("⚖️ Hukuki Metin Soru-Cevap ve Araştırma Asistanı")
-st.caption("LangGraph Destekli Kendi Kendini Denetleyen Hukuk Ajanı (Corrective RAG)")
-
-# Oturum durumlarını (Session State) başlatma
+# Oturum Durumu
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 
-# --- YAN PANEL: PDF YÜKLEME VE İNDEKSLER ---
+# Yan Panel: Belge Yönetimi
 with st.sidebar:
-    st.header("📄 Doküman Yönetimi")
-    uploaded_file = st.file_uploader("Bir Hukuki PDF Yükleyin", type=["pdf"])
+    st.title("📄 Belgeler")
+    uploaded_file = st.file_uploader("PDF Yükle", type=["pdf"], label_visibility="collapsed")
 
-    if uploaded_file is not None:
-        if st.button("Belgeyi İndeksle", use_container_width=True):
-            with st.spinner("PDF işleniyor ve vektör veritabanına kaydediliyor..."):
-                os.makedirs("data", exist_ok=True)
-                file_path = os.path.join("data", uploaded_file.name)
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
+    if uploaded_file and st.button("Belgeyi İndeksle", use_container_width=True):
+        with st.spinner("İndeksleniyor..."):
+            os.makedirs("data", exist_ok=True)
+            file_path = os.path.join("data", uploaded_file.name)
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
 
-                # PDF Yükleme ve Parçalama (Hukuki madde bütünlüğünü koruyan ayarlar)
-                loader = PyPDFLoader(file_path)
-                docs = loader.load()
+            docs = PyPDFLoader(file_path).load()
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+            chunks = splitter.split_documents(docs)
 
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=1000,
-                    chunk_overlap=150,
-                    separators=["\nMadde ", "\n\n", "\n", " ", ""]
-                )
-                chunks = text_splitter.split_documents(docs)
+            embeddings = HuggingFaceEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
+            Chroma.from_documents(chunks, embeddings, persist_directory="./chroma_db")
+            st.success("Belge hazır!")
 
-                # ChromaDB'ye ekleme (Çok dilli model)
-                embeddings = HuggingFaceEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
-                Chroma.from_documents(
-                    documents=chunks,
-                    embedding=embeddings,
-                    persist_directory="./chroma_db"
-                )
-                st.success(f"Başarılı! {len(chunks)} parça ChromaDB'ye eklendi.")
+    if st.session_state.messages:
+        st.divider()
+        if st.button("Sohbeti Temizle", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.rerun()
 
-    if st.button("Sohbet Geçmişini Temizle", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.thread_id = str(uuid.uuid4())
-        st.rerun()
+# Ana Ekran
+st.title("⚖️ Hukuki Asistan")
 
-# --- ANA EKRAN: SOHBET GEÇMİŞİ ---
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# Sohbet Geçmişi
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# --- KULLANICI GİRDİSİ ---
-user_question = st.chat_input("Hukuki metinle ilgili bir soru sorun...")
-
-if user_question:
-    # 1. Kullanıcı mesajını ekrana ve geçmişe ekle
-    st.session_state.messages.append({"role": "user", "content": user_question})
+# Soru Girişi
+if prompt := st.chat_input("Bir soru sorun..."):
+    # Kullanıcı mesajı
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(user_question)
+        st.markdown(prompt)
 
-    # 2. Asistan cevabını oluştur
+    # Asistan yanıtı
     with st.chat_message("assistant"):
-        status_box = st.status("🔍 Ajan çalışıyor...", expanded=True)
+        with st.spinner("Düşünüyor..."):
+            history = [
+                HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
+                for m in st.session_state.messages[:-1]
+            ]
+            inputs = {"question": prompt, "chat_history": history}
+            config = {"configurable": {"thread_id": st.session_state.thread_id}}
 
-        # Mesaj geçmişini LangChain formatına çevirme
-        history_messages = []
-        for msg in st.session_state.messages[:-1]:  # Son kullanıcı mesajı hariç önceki konuşmalar
-            if msg["role"] == "user":
-                history_messages.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "assistant":
-                history_messages.append(AIMessage(content=msg["content"]))
+            try:
+                result = legal_agent_app.invoke(inputs, config=config)
+                answer = result.get("generation", "Yanıt üretilemedi.")
+            except Exception as e:
+                answer = f"Bir hata oluştu: {e}"
 
-        inputs = {
-            "question": user_question,
-            "chat_history": history_messages
-        }
+            st.markdown(answer)
 
-        # LangGraph Memory için oturuma özel thread ID
-        config = {"configurable": {"thread_id": st.session_state.thread_id}}
-        final_answer = ""
-
-        try:
-            for output in legal_agent_app.stream(inputs, config=config):
-                for node_name, node_state in output.items():
-                    if node_name == "general_chat":
-                        status_box.write("💬 **Sohbet:** Genel sohbet yanıtı oluşturuluyor...")
-                        final_answer = node_state.get("generation", "")
-                    elif node_name == "retrieve":
-                        doc_count = len(node_state.get("documents", []))
-                        status_box.write(f"📥 **Vektör Veritabanı:** {doc_count} ilgili metin parçası çekildi.")
-                    elif node_name == "grade_documents":
-                        valid_count = len(node_state.get("documents", []))
-                        status_box.write(f"⚖️ **Hukuki Denetim:** {valid_count} parça soruyla alakalı onaylandı.")
-                    elif node_name == "transform_query":
-                        new_q = node_state.get("question", "")
-                        status_box.write(f"🔄 **Sorgu İyileştirme:** Soru yenilendi: *'{new_q}'*")
-                    elif node_name == "generate":
-                        status_box.write("✍️ **Sentez:** Hukuki yanıt oluşturuldu.")
-                        final_answer = node_state.get("generation", "")
-
-            status_box.update(label="✅ Tamamlandı", state="complete", expanded=False)
-            st.markdown(final_answer)
-
-        except Exception as e:
-            status_box.update(label="❌ Hata oluştu", state="error", expanded=True)
-            st.error(f"Ajan çalışırken bir hata meydana geldi: {e}")
-            final_answer = "Bir hata oluştu, lütfen konsolu kontrol edin."
-
-    # 3. Asistan cevabını geçmişe kaydet
-    st.session_state.messages.append({"role": "assistant", "content": final_answer})
+    st.session_state.messages.append({"role": "assistant", "content": answer})
